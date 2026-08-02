@@ -1180,6 +1180,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg-base);
   background:var(--bg-base);
   display:none;flex-direction:column;z-index:5;
   overflow-y:auto;-webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
 }
 #year-view.open{display:flex;}
 #year-body{
@@ -3189,6 +3190,7 @@ function seedSample(){
 ============================================================ */
 const today=new Date();
 let curYear=today.getFullYear(),curMonth=today.getMonth();
+let yearViewYear=curYear;
 let curWeekStart=null;
 let selectedDate={y:today.getFullYear(),m:today.getMonth(),d:today.getDate(),
   key:String(today.getFullYear())+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0')};
@@ -4160,9 +4162,22 @@ function syncTaskToCalendar(t){
 // setView() の DOM クリア対象に追加
 
 
-function openYearView(){
-  renderYearView(curYear);
-  currentView='year';lastMainView='year';showBottomNav();setActiveNav('view');
+function updateYearHeader(){
+  var label=document.getElementById('hd-week-label');
+  if(label) label.textContent=yearViewYear+'年';
+}
+
+function openYearView(syncWithMonth){
+  if(syncWithMonth) yearViewYear=curYear;
+  setView('year');
+  renderYearView(yearViewYear);
+  updateYearHeader();
+}
+
+function shiftYear(dir){
+  yearViewYear+=dir;
+  renderYearView(yearViewYear);
+  updateYearHeader();
 }
 
 function renderYearView(y){
@@ -4226,8 +4241,44 @@ function renderYearView(y){
     card.appendChild(grid);
     body.appendChild(card);
   }
-  // ヘッダーに年を表示（hd-trackは週表示で非表示にした場合あり）
 }
+
+// 年間表示専用スワイプ（月表示のスワイプ状態とは分離）
+(function initYearSwipe(){
+  var yearView=document.getElementById('year-view');
+  if(!yearView) return;
+  var startX=0,startY=0,lastX=0,lastY=0,tracking=false;
+  var minDistance=50;
+
+  yearView.addEventListener('touchstart',function(e){
+    if(currentView!=='year'||e.touches.length!==1){ tracking=false;return; }
+    startX=lastX=e.touches[0].clientX;
+    startY=lastY=e.touches[0].clientY;
+    tracking=true;
+  },{passive:true});
+
+  yearView.addEventListener('touchmove',function(e){
+    if(!tracking||e.touches.length!==1)return;
+    lastX=e.touches[0].clientX;
+    lastY=e.touches[0].clientY;
+  },{passive:true});
+
+  yearView.addEventListener('touchend',function(e){
+    if(!tracking)return;
+    tracking=false;
+    if(e.changedTouches&&e.changedTouches.length){
+      lastX=e.changedTouches[0].clientX;
+      lastY=e.changedTouches[0].clientY;
+    }
+    var dx=lastX-startX,dy=lastY-startY;
+    if(Math.abs(dx)>=minDistance&&Math.abs(dx)>Math.abs(dy)*1.25){
+      e.preventDefault();
+      shiftYear(dx<0?1:-1);
+    }
+  },{passive:false});
+
+  yearView.addEventListener('touchcancel',function(){ tracking=false; },{passive:true});
+})();
 
 
 function renderTodayScreen(){
@@ -4313,6 +4364,14 @@ function setView(v){
   if(hd_track) hd_track.style.display='';
   document.getElementById('btn-prev').onclick=function(){slide(-1);};
   document.getElementById('btn-next').onclick=function(){slide(+1);};
+
+  if(v==='year'){
+    if(hd_track) hd_track.style.display='none';
+    if(hd_week_label) hd_week_label.style.display='block';
+    updateYearHeader();
+    document.getElementById('btn-prev').onclick=function(){shiftYear(-1);};
+    document.getElementById('btn-next').onclick=function(){shiftYear(+1);};
+  }
 
   currentView=v;
   if(isMainView(v)) lastMainView=v;
@@ -5073,6 +5132,7 @@ document.getElementById('modal-save').addEventListener('click', function() {
     // 画面を更新
     if(_lmv==='today2'){ renderTodayScreen(); }
     else if(_lmv==='week'){ renderWeekView(); }
+    else if(_lmv==='year'){ openYearView(); }
     else { renderAll(); }
     if(_lmv==='month'||_lmv==='week') showDetailPanel(startKey);
 
@@ -6234,6 +6294,7 @@ function closeViewSwitcher(){
   if(vs) vs.classList.remove('open');
 }
 function switchView(v){
+  var fromView=currentView;
   closeViewSwitcher();
   if(v==='month'){
     setView('month'); renderAll();
@@ -6242,7 +6303,7 @@ function switchView(v){
   } else if(v==='today2'){
     setView('today2'); openTodayScreen();
   } else if(v==='year'){
-    setView('year'); openYearView();
+    setView('year'); openYearView(fromView==='month');
   } else if(v==='task'){
     setView('task'); openTaskView();
   }
@@ -6275,8 +6336,8 @@ document.getElementById('nav-search').addEventListener('click',()=>{
 document.getElementById('nav-settings').addEventListener('click',()=>{
   openSettings();
 });
-document.getElementById('btn-prev').addEventListener('click',()=>{slide(-1);});
-document.getElementById('btn-next').addEventListener('click',()=>{slide(+1);});
+document.getElementById('btn-prev').onclick=()=>{slide(-1);};
+document.getElementById('btn-next').onclick=()=>{slide(+1);};
 
 /* ============================================================
    PWA - Service Worker登録
