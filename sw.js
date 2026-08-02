@@ -3,7 +3,7 @@
    Cache-first / Network-fallback 戦略
    ※ このファイルは index.html と同じディレクトリに置いてください
 ============================================================ */
-var CACHE_NAME = 'techyo-v4';
+var CACHE_NAME = 'techyo-v5';
 
 /* インストール時：コアファイルをキャッシュ */
 self.addEventListener('install', function(e) {
