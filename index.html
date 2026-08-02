@@ -1179,11 +1179,21 @@ html,body{height:100%;font-family:var(--font);background:var(--bg-base);
   bottom:calc(var(--nav-h) + var(--safe-b));
   background:var(--bg-base);
   display:none;flex-direction:column;z-index:5;
-  overflow-y:auto;-webkit-overflow-scrolling:touch;
+  overflow:hidden;
   touch-action:pan-y;
 }
 #year-view.open{display:flex;}
-#year-body{
+#year-slide-track{
+  display:flex;width:300%;height:100%;
+  flex-shrink:0;will-change:transform;
+  transform:translateX(-33.3333%);
+}
+.year-page{
+  width:33.3333%;height:100%;flex-shrink:0;
+  overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+}
+.year-body{
   display:grid;
   grid-template-columns:repeat(3,1fr);
   gap:10px;
@@ -2300,7 +2310,11 @@ html,body{height:100%;font-family:var(--font);background:var(--bg-base);
 
 <!-- YEAR VIEW（年間表示） -->
 <div id="year-view">
-  <div id="year-body"></div>
+  <div id="year-slide-track">
+    <div class="year-page" id="year-page-prev"><div class="year-body" id="year-body-prev"></div></div>
+    <div class="year-page" id="year-page-current"><div class="year-body" id="year-body"></div></div>
+    <div class="year-page" id="year-page-next"><div class="year-body" id="year-body-next"></div></div>
+  </div>
 </div>
 
 <!-- TASK VIEW（タスク一覧） -->
@@ -3191,6 +3205,7 @@ function seedSample(){
 const today=new Date();
 let curYear=today.getFullYear(),curMonth=today.getMonth();
 let yearViewYear=curYear;
+let yearIsAnimating=false;
 let curWeekStart=null;
 let selectedDate={y:today.getFullYear(),m:today.getMonth(),d:today.getDate(),
   key:String(today.getFullYear())+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0')};
@@ -4174,16 +4189,32 @@ function openYearView(syncWithMonth){
   updateYearHeader();
 }
 
-function shiftYear(dir){
-  yearViewYear+=dir;
-  renderYearView(yearViewYear);
-  updateYearHeader();
+function yearViewWidth(){
+  var view=document.getElementById('year-view');
+  if(!view)return 0;
+  var rect=view.getBoundingClientRect();
+  return rect.width||view.clientWidth||view.offsetWidth;
 }
 
-function renderYearView(y){
-  var body = document.getElementById('year-body');
-  if(!body) return;
-  body.innerHTML = '';
+function resetYearTrackInstant(){
+  var track=document.getElementById('year-slide-track');
+  var width=yearViewWidth();
+  if(!track||!width)return;
+  track.style.transition='none';
+  track.style.transform='translateX('+(-width)+'px)';
+  track.getBoundingClientRect();
+}
+
+function syncYearPageScroll(scrollTop){
+  ['year-page-prev','year-page-current','year-page-next'].forEach(function(id){
+    var page=document.getElementById(id);
+    if(page) page.scrollTop=scrollTop;
+  });
+}
+
+function buildYearPage(body,y){
+  if(!body)return;
+  body.innerHTML='';
   var DOWS = ['S','M','T','W','T','F','S'];
   for(var mo=0; mo<12; mo++){
     var card = document.createElement('div');
@@ -4231,6 +4262,7 @@ function renderYearView(y){
       // タップで月表示のその日へ移動
       (function(y2, mo2, d3, k2){
         dEl2.addEventListener('click', function(){
+          if(yearIsAnimating)return;
           curYear=y2; curMonth=mo2;
           selectedDate={y:y2,m:mo2,d:d3,key:k2};
           setView('month'); renderAll();
@@ -4243,41 +4275,142 @@ function renderYearView(y){
   }
 }
 
+function renderYearView(y,scrollTop){
+  var currentPage=document.getElementById('year-page-current');
+  var keepScroll=typeof scrollTop==='number'?scrollTop:(currentPage?currentPage.scrollTop:0);
+  buildYearPage(document.getElementById('year-body-prev'),y-1);
+  buildYearPage(document.getElementById('year-body'),y);
+  buildYearPage(document.getElementById('year-body-next'),y+1);
+  syncYearPageScroll(keepScroll);
+  resetYearTrackInstant();
+}
+
+function finishYearSlide(dir,scrollTop){
+  yearViewYear+=dir;
+  renderYearView(yearViewYear,scrollTop);
+  updateYearHeader();
+  yearIsAnimating=false;
+}
+
+function slideYear(dir,options){
+  if(yearIsAnimating||currentView!=='year')return;
+  var track=document.getElementById('year-slide-track');
+  var currentPage=document.getElementById('year-page-current');
+  var width=yearViewWidth();
+  if(!track||!width)return;
+  var opts=options||{};
+  var velocity=Math.abs(opts.velocity||0);
+  var scrollTop=currentPage?currentPage.scrollTop:0;
+  syncYearPageScroll(scrollTop);
+  yearIsAnimating=true;
+
+  if(!opts.fromDrag){
+    track.style.transition='none';
+    track.style.transform='translateX('+(-width)+'px)';
+    track.getBoundingClientRect();
+  }
+
+  var target=dir>0?-width*2:0;
+  var ease='cubic-bezier(0.15,0.85,0.35,1.0)';
+  var dur=Math.max(200,Math.min(520,370-velocity*230));
+  requestAnimationFrame(function(){
+    track.style.transition='transform '+dur+'ms '+ease;
+    track.style.transform='translateX('+target+'px)';
+  });
+  setTimeout(function(){ finishYearSlide(dir,scrollTop); },dur+20);
+}
+
+function cancelYearSlide(velocity){
+  if(yearIsAnimating)return;
+  var track=document.getElementById('year-slide-track');
+  var width=yearViewWidth();
+  if(!track||!width)return;
+  yearIsAnimating=true;
+  var ease='cubic-bezier(0.15,0.85,0.35,1.0)';
+  var dur=Math.max(200,Math.min(420,300-Math.abs(velocity||0)*140));
+  track.style.transition='transform '+dur+'ms '+ease;
+  track.style.transform='translateX('+(-width)+'px)';
+  setTimeout(function(){
+    resetYearTrackInstant();
+    yearIsAnimating=false;
+  },dur+20);
+}
+
 // 年間表示専用スワイプ（月表示のスワイプ状態とは分離）
 (function initYearSwipe(){
   var yearView=document.getElementById('year-view');
   if(!yearView) return;
-  var startX=0,startY=0,lastX=0,lastY=0,tracking=false;
-  var minDistance=50;
+  var startX=0,startY=0,lastX=0,lastY=0,lastT=0;
+  var dragX=0,velocity=0,tracking=false,dirLocked=false,swipeOn=false,verticalOn=false;
+  var suppressClick=false;
 
   yearView.addEventListener('touchstart',function(e){
-    if(currentView!=='year'||e.touches.length!==1){ tracking=false;return; }
+    if(yearIsAnimating||currentView!=='year'||e.touches.length!==1){ tracking=false;return; }
     startX=lastX=e.touches[0].clientX;
     startY=lastY=e.touches[0].clientY;
-    tracking=true;
+    lastT=performance.now();
+    dragX=0;velocity=0;tracking=true;dirLocked=false;swipeOn=false;verticalOn=false;
   },{passive:true});
 
   yearView.addEventListener('touchmove',function(e){
     if(!tracking||e.touches.length!==1)return;
-    lastX=e.touches[0].clientX;
-    lastY=e.touches[0].clientY;
-  },{passive:true});
+    var cx=e.touches[0].clientX,cy=e.touches[0].clientY;
+    var dx=cx-startX,dy=cy-startY;
+    if(!dirLocked){
+      if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>5){
+        swipeOn=true;dirLocked=true;suppressClick=true;
+        var currentPage=document.getElementById('year-page-current');
+        syncYearPageScroll(currentPage?currentPage.scrollTop:0);
+      }else if(Math.abs(dy)>Math.abs(dx)&&Math.abs(dy)>5){
+        verticalOn=true;dirLocked=true;
+      }
+    }
+    if(swipeOn){
+      e.preventDefault();
+      var now=performance.now(),dt=now-lastT;
+      if(dt>0)velocity=(cx-lastX)/dt;
+      lastX=cx;lastY=cy;lastT=now;dragX=dx;
+      var width=yearViewWidth();
+      var track=document.getElementById('year-slide-track');
+      if(track&&width){
+        dragX=Math.max(-width,Math.min(width,dragX));
+        track.style.transition='none';
+        track.style.transform='translateX('+(-width+dragX)+'px)';
+      }
+    }
+  },{passive:false});
 
   yearView.addEventListener('touchend',function(e){
     if(!tracking)return;
     tracking=false;
+    if(verticalOn||!swipeOn){
+      swipeOn=false;verticalOn=false;dirLocked=false;
+      return;
+    }
     if(e.changedTouches&&e.changedTouches.length){
-      lastX=e.changedTouches[0].clientX;
-      lastY=e.changedTouches[0].clientY;
+      dragX=e.changedTouches[0].clientX-startX;
     }
-    var dx=lastX-startX,dy=lastY-startY;
-    if(Math.abs(dx)>=minDistance&&Math.abs(dx)>Math.abs(dy)*1.25){
-      e.preventDefault();
-      shiftYear(dx<0?1:-1);
-    }
+    e.preventDefault();
+    var width=yearViewWidth();
+    var ok=Math.abs(dragX)>width*.25||Math.abs(velocity)>.3;
+    if(ok) slideYear(dragX<0?1:-1,{fromDrag:true,velocity:velocity});
+    else cancelYearSlide(velocity);
+    swipeOn=false;verticalOn=false;dirLocked=false;
+    setTimeout(function(){ suppressClick=false; },400);
   },{passive:false});
 
-  yearView.addEventListener('touchcancel',function(){ tracking=false; },{passive:true});
+  yearView.addEventListener('touchcancel',function(){
+    if(tracking&&swipeOn)cancelYearSlide(velocity);
+    tracking=false;swipeOn=false;verticalOn=false;dirLocked=false;
+    setTimeout(function(){ suppressClick=false; },400);
+  },{passive:true});
+
+  yearView.addEventListener('click',function(e){
+    if(!suppressClick)return;
+    e.preventDefault();
+    e.stopPropagation();
+    suppressClick=false;
+  },true);
 })();
 
 
@@ -4369,8 +4502,8 @@ function setView(v){
     if(hd_track) hd_track.style.display='none';
     if(hd_week_label) hd_week_label.style.display='block';
     updateYearHeader();
-    document.getElementById('btn-prev').onclick=function(){shiftYear(-1);};
-    document.getElementById('btn-next').onclick=function(){shiftYear(+1);};
+    document.getElementById('btn-prev').onclick=function(){slideYear(-1);};
+    document.getElementById('btn-next').onclick=function(){slideYear(+1);};
   }
 
   currentView=v;
